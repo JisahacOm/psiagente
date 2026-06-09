@@ -6,6 +6,9 @@ import json
 import asyncio
 import requests
 from datetime import datetime
+from zoneinfo import ZoneInfo
+
+tijuana_tz = ZoneInfo("America/Tijuana")
 from anthropic import Anthropic
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
@@ -174,7 +177,7 @@ def save_appointment(data: dict) -> str:
             "time":         data["time"],
             "modality":     "presencial",
             "telegram_id":  data["telegram_id"],
-            "created_at":   datetime.utcnow().isoformat(),
+            "created_at":   datetime.now(tijuana_tz).isoformat(),
             "status":       "confirmed"
         }).execute()
         return "Cita guardada correctamente."
@@ -202,7 +205,7 @@ def reschedule_appointment(data: dict) -> str:
             "time":         data["time"],
             "modality":     "presencial",
             "telegram_id":  data["telegram_id"],
-            "created_at":   datetime.utcnow().isoformat(),
+            "created_at":   datetime.now(tijuana_tz).isoformat(),
             "status":       "confirmed"
         }).execute()
         return "Cita reagendada correctamente."
@@ -279,7 +282,7 @@ def save_history(chat_id: str, messages: list):
         supabase.table("conversations").upsert({
             "chat_id":    chat_id,
             "messages":   messages,
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.now(tijuana_tz).isoformat()
         }).execute()
     except Exception as e:
         print(f"[ERROR save_history chat_id={chat_id}] {e}")
@@ -367,7 +370,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"[HIST] chat_id={chat_id} | ANTES: {before} mensajes")
     history.append({"role": "user", "content": user_text})
 
-    fecha_actual  = datetime.now().strftime("%d de %B de %Y")
+    fecha_actual  = datetime.now(tijuana_tz).strftime("%d de %B de %Y")
     system_prompt = SYSTEM_PROMPT.replace("{fecha_actual}", fecha_actual)
 
     # Llamada a Claude con tools
