@@ -215,7 +215,7 @@ def reschedule_appointment(data: dict) -> str:
 def cancel_appointment(data: dict) -> str:
     try:
         res = supabase.table("appointments") \
-            .select("id") \
+            .select("id, date, time") \
             .eq("telegram_id", data["telegram_id"]) \
             .eq("status", "confirmed") \
             .order("created_at", desc=True) \
@@ -223,10 +223,16 @@ def cancel_appointment(data: dict) -> str:
             .execute()
         if not res.data:
             return "No se encontró cita activa para cancelar."
+        appt_data = res.data[0]
         supabase.table("appointments") \
             .update({"status": "cancelled_by_patient"}) \
-            .eq("id", res.data[0]["id"]) \
+            .eq("id", appt_data["id"]) \
             .execute()
+        requests.post(
+            "https://simple-n8n-production-8252.up.railway.app/webhook/psiagente-cancelacion",
+            json={"date": appt_data["date"], "time": appt_data["time"]},
+            timeout=5
+        )
         return "Cita cancelada correctamente."
     except Exception as e:
         return f"Error al cancelar: {e}"
@@ -354,6 +360,11 @@ async def handle_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             .update({"status": "cancelled_by_doctor"}) \
             .eq("id", appt["id"]) \
             .execute()
+        requests.post(
+            "https://simple-n8n-production-8252.up.railway.app/webhook/psiagente-cancelacion",
+            json={"date": appt["date"], "time": appt["time"]},
+            timeout=5
+        )
         await update.message.reply_text(
             f"✅ Mensaje enviado a {appt['patient_name']} y cita cancelada."
         )
