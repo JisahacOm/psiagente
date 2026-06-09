@@ -4,18 +4,25 @@ load_dotenv()
 import os
 import json
 import asyncio
+import requests
 from datetime import datetime
 from anthropic import Anthropic
 from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from supabase import create_client
+
+MESES = {
+    1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
+    5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
+    9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+}
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
 anthropic = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase  = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
 SYSTEM_PROMPT = """
-Eres Sofía, la asistente virtual de la Dra. Marysol Beltrán, psicóloga clínica.
+Eres Sofía, la asistente virtual de la Psic. Marysol Beltrán, psicóloga clínica.
 
 Tu único rol es gestionar citas: recibir pacientes, agendar, confirmar y hacer seguimiento.
 NO realizas terapia, NO das consejos psicológicos, NO diagnosticas.
@@ -62,10 +69,13 @@ Duración de cada sesión: 50 minutos
 Modalidad: presencial en Tijuana o videollamada (preguntar preferencia)
 
 ── INFORMACIÓN DEL CONSULTORIO ───────────────────────────────────────────────
-- Psicóloga: Dra. Marysol Beltrán
-- Costo por sesión: [COMPLETAR con tarifa real]
-- Ubicación: [COMPLETAR con dirección real]
-- Para emergencias del consultorio: responde con el número directo de la Dra.
+- Psicóloga: Psic. Marysol Beltrán
+- Costo por sesión: $800 MXN
+- Ubicación: Edificio Verde, segundo piso al fondo a la izquierda, Tijuana
+- Google Maps: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
+- Para emergencias del consultorio: responde con el número directo de la Psic. Marysol
+
+Cuando confirmes una cita PRESENCIAL, incluye el link de ubicación en el mismo mensaje de confirmación: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
 
 ── 🚨 PROTOCOLO DE CRISIS — PRIORIDAD MÁXIMA ─────────────────────────────────
 Si el paciente expresa ideación suicida, autolesión, abuso, o angustia severa:
@@ -76,7 +86,7 @@ Si el paciente expresa ideación suicida, autolesión, abuso, o angustia severa:
    - SAPTEL (24/7): 55 5259-8121
    - IMSS Línea de la Vida: 800 890 3200
    - Emergencias: 911
-4. Ofrece contactar directamente a la Dra. Marysol
+4. Ofrece contactar directamente a la Psic. Marysol
 5. Llama a la función flag_crisis para alertar a la psicóloga
 
 Señales a detectar (no solo palabras literales, evalúa el contexto emocional):
@@ -215,8 +225,6 @@ def cancel_appointment(data: dict) -> str:
         return f"Error al cancelar: {e}"
 
 def flag_crisis(data: dict, bot_token: str, psych_telegram_id: str) -> str:
-    """Notifica a la psicóloga por Telegram cuando hay una crisis."""
-    import requests
     name = data.get("patient_name", "Paciente desconocido")
     tid  = data["telegram_id"]
     msg  = (
@@ -230,7 +238,7 @@ def flag_crisis(data: dict, bot_token: str, psych_telegram_id: str) -> str:
         f"https://api.telegram.org/bot{bot_token}/sendMessage",
         json={"chat_id": psych_telegram_id, "text": msg}
     )
-    return "Alerta enviada a la Dra. Marysol."
+    return "Alerta enviada a la Psic. Marysol."
 
 # ── Serialización de bloques SDK ──────────────────────────────────────────────
 def blocks_to_dicts(content) -> list:
@@ -271,6 +279,79 @@ def save_history(chat_id: str, messages: list):
         }).execute()
     except Exception as e:
         print(f"[ERROR save_history chat_id={chat_id}] {e}")
+
+# ── Comando /cancelar (solo psicóloga) ────────────────────────────────────────
+async def handle_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    psych_id  = os.environ.get("PSYCHOLOGIST_TELEGRAM_ID", "")
+    sender_id = str(update.effective_chat.id)
+
+    if sender_id != psych_id:
+        await update.message.reply_text("Solo la Psic. Marysol puede usar este comando.")
+        return
+
+    raw = " ".join(context.args) if context.args else ""
+    if not raw:
+        await update.message.reply_text("Uso: /cancelar [nombre paciente] | [motivo opcional]")
+        return
+
+    if "|" in raw:
+        nombre, motivo = raw.split("|", 1)
+        nombre = nombre.strip()
+        motivo = motivo.strip()
+    else:
+        nombre = raw.strip()
+        motivo  = None
+
+    try:
+        res = supabase.table("appointments") \
+            .select("id, telegram_id, date, time, patient_name") \
+            .ilike("patient_name", f"%{nombre}%") \
+            .eq("status", "confirmed") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+    except Exception as e:
+        await update.message.reply_text(f"Error al buscar la cita: {e}")
+        return
+
+    if not res.data:
+        await update.message.reply_text(f"No encontré cita activa para '{nombre}'.")
+        return
+
+    appt       = res.data[0]
+    patient_tid = appt["telegram_id"]
+    first_name  = appt["patient_name"].split()[0]
+    hora_str    = str(appt["time"])[:5]
+
+    try:
+        dt       = datetime.strptime(str(appt["date"]), "%Y-%m-%d")
+        fecha_fmt = f"{dt.day} de {MESES[dt.month]}"
+    except Exception:
+        fecha_fmt = str(appt["date"])
+
+    motivo_txt = motivo if motivo else "motivos personales"
+    msg = (
+        f"Hola {first_name} 🙏 Qué pena contigo, la Psic. Marysol tuvo que cancelar "
+        f"tu cita del {fecha_fmt} a las {hora_str} por {motivo_txt}. "
+        f"Disculpa el inconveniente, cuando quieras reagendar aquí estamos 💪"
+    )
+
+    bot_token = os.environ["TELEGRAM_TOKEN"]
+    resp = requests.post(
+        f"https://api.telegram.org/bot{bot_token}/sendMessage",
+        json={"chat_id": patient_tid, "text": msg}
+    )
+
+    if resp.status_code == 200:
+        supabase.table("appointments") \
+            .update({"status": "cancelled_by_doctor"}) \
+            .eq("id", appt["id"]) \
+            .execute()
+        await update.message.reply_text(
+            f"✅ Mensaje enviado a {appt['patient_name']} y cita cancelada."
+        )
+    else:
+        await update.message.reply_text(f"Error enviando mensaje al paciente: {resp.text}")
 
 # ── Handler principal de Telegram ─────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -351,6 +432,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Arranque ───────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     app = ApplicationBuilder().token(os.environ["TELEGRAM_TOKEN"]).build()
+    app.add_handler(CommandHandler("cancelar", handle_cancelar))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     print("✅ PsiAgente corriendo...")
     app.run_polling()
