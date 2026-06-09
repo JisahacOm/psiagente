@@ -39,12 +39,12 @@ en ese mismo idioma desde el primer mensaje. No lo cambies durante la conversaci
 
 ── FLUJO DE AGENDAMIENTO ─────────────────────────────────────────────────────
 1. Saluda y pregunta en qué puedes ayudar
-2. Si quiere cita: pide nombre completo, luego número de contacto
+2. Si quiere cita: pide nombre completo y número de contacto en un solo mensaje — "Para agendar tu cita, ¿me compartes tu nombre completo y número de contacto?"
 3. Informa disponibilidad: Lunes a Viernes 9am–7pm, Sábados 9am–2pm (Tijuana, México)
 4. Confirma día y hora específicos
-5. Muestra el resumen completo de la cita (nombre, fecha, hora, modalidad) y pregunta explícitamente: "¿Confirmas tu cita?" o "¿Todo correcto?"
+5. Muestra el resumen completo de la cita (nombre, fecha, hora) y pregunta explícitamente: "¿Confirmas tu cita?" o "¿Todo correcto?"
 6. SOLO después de que el paciente responda afirmativamente: llama a save_appointment
-7. Despídete cálidamente
+7. Despídete cálidamente e incluye el link de ubicación: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
 
 ── REAGENDAMIENTO ────────────────────────────────────────────────────────────
 Si el paciente quiere cambiar su cita existente:
@@ -72,7 +72,7 @@ Por ahora usa disponibilidad fija:
 - Lunes a Viernes: 9:00, 10:00, 11:00, 12:00, 15:00, 16:00, 17:00, 18:00, 19:00
 - Sábados: 9:00, 10:00, 11:00, 12:00, 13:00
 Duración de cada sesión: 50 minutos
-Modalidad: presencial en Tijuana o videollamada (preguntar preferencia)
+Modalidad: únicamente presencial en Tijuana. No ofrecer ni mencionar videollamada.
 
 ── INFORMACIÓN DEL CONSULTORIO ───────────────────────────────────────────────
 - Psicóloga: Psic. Marysol Beltrán
@@ -81,7 +81,7 @@ Modalidad: presencial en Tijuana o videollamada (preguntar preferencia)
 - Google Maps: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
 - Para emergencias del consultorio: responde con el número directo de la Psic. Marysol
 
-Cuando confirmes una cita PRESENCIAL, incluye el link de ubicación en el mismo mensaje de confirmación: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
+Todas las citas son presenciales. Siempre incluye el link de ubicación al confirmar: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
 
 ── 🚨 PROTOCOLO DE CRISIS — PRIORIDAD MÁXIMA ─────────────────────────────────
 Si el paciente expresa ideación suicida, autolesión, abuso, o angustia severa:
@@ -119,10 +119,9 @@ tools = [
                 "phone":         {"type": "string", "description": "Número de contacto"},
                 "date":          {"type": "string", "description": "Fecha de la cita YYYY-MM-DD"},
                 "time":          {"type": "string", "description": "Hora de la cita HH:MM"},
-                "modality":      {"type": "string", "enum": ["presencial", "videollamada"]},
                 "telegram_id":   {"type": "string", "description": "ID de Telegram del paciente"}
             },
-            "required": ["patient_name", "phone", "date", "time", "modality", "telegram_id"]
+            "required": ["patient_name", "phone", "date", "time", "telegram_id"]
         }
     },
     {
@@ -135,10 +134,9 @@ tools = [
                 "patient_name": {"type": "string", "description": "Nombre completo del paciente"},
                 "phone":        {"type": "string", "description": "Número de contacto"},
                 "date":         {"type": "string", "description": "Nueva fecha YYYY-MM-DD"},
-                "time":         {"type": "string", "description": "Nueva hora HH:MM"},
-                "modality":     {"type": "string", "enum": ["presencial", "videollamada"]}
+                "time":         {"type": "string", "description": "Nueva hora HH:MM"}
             },
-            "required": ["telegram_id", "patient_name", "phone", "date", "time", "modality"]
+            "required": ["telegram_id", "patient_name", "phone", "date", "time"]
         }
     },
     {
@@ -174,7 +172,7 @@ def save_appointment(data: dict) -> str:
             "phone":        data["phone"],
             "date":         data["date"],
             "time":         data["time"],
-            "modality":     data["modality"],
+            "modality":     "presencial",
             "telegram_id":  data["telegram_id"],
             "created_at":   datetime.utcnow().isoformat(),
             "status":       "confirmed"
@@ -202,7 +200,7 @@ def reschedule_appointment(data: dict) -> str:
             "phone":        data["phone"],
             "date":         data["date"],
             "time":         data["time"],
-            "modality":     data["modality"],
+            "modality":     "presencial",
             "telegram_id":  data["telegram_id"],
             "created_at":   datetime.utcnow().isoformat(),
             "status":       "confirmed"
