@@ -42,8 +42,9 @@ en ese mismo idioma desde el primer mensaje. No lo cambies durante la conversaci
 2. Si quiere cita: pide nombre completo, luego número de contacto
 3. Informa disponibilidad: Lunes a Viernes 9am–7pm, Sábados 9am–2pm (Tijuana, México)
 4. Confirma día y hora específicos
-5. Resume la cita y despídete cálidamente
-6. Registra: llama a la función save_appointment con los datos
+5. Muestra el resumen completo de la cita (nombre, fecha, hora, modalidad) y pregunta explícitamente: "¿Confirmas tu cita?" o "¿Todo correcto?"
+6. SOLO después de que el paciente responda afirmativamente: llama a save_appointment
+7. Despídete cálidamente
 
 ── REAGENDAMIENTO ────────────────────────────────────────────────────────────
 Si el paciente quiere cambiar su cita existente:
@@ -61,6 +62,7 @@ Si el paciente quiere cancelar su cita:
 
 ── DISPONIBILIDAD ────────────────────────────────────────────────────────────
 La fecha actual es: {fecha_actual}. Úsala como referencia para interpretar fechas que el paciente mencione sin año.
+Cuando el paciente mencione una fecha ambigua (sin año, sin día de semana, o que corrija una fecha anterior), SIEMPRE confirma antes de continuar: pregunta "¿Quisiste decir el [fecha completa]?" y espera su respuesta. No asumas la fecha hasta que el paciente confirme.
 Solo considera ocupados los horarios de citas con status "confirmed". Citas con status "rescheduled" o "cancelled_by_patient" liberan ese horario.
 Por ahora usa disponibilidad fija:
 - Lunes a Viernes: 9:00, 10:00, 11:00, 12:00, 15:00, 16:00, 17:00, 18:00, 19:00
@@ -331,7 +333,7 @@ async def handle_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     motivo_txt = motivo if motivo else "motivos personales"
     msg = (
-        f"Hola {first_name} 🙏 Qué pena contigo, la Psic. Marysol tuvo que cancelar "
+        f"Hola {first_name} 🙏 Te pido una gran disculpa, la Psic. Marysol tuvo que cancelar "
         f"tu cita del {fecha_fmt} a las {hora_str} por {motivo_txt}. "
         f"Disculpa el inconveniente, cuando quieras reagendar aquí estamos 💪"
     )
