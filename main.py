@@ -38,8 +38,23 @@ en ese mismo idioma desde el primer mensaje. No lo cambies durante la conversaci
 5. Resume la cita y despídete cálidamente
 6. Registra: llama a la función save_appointment con los datos
 
+── REAGENDAMIENTO ────────────────────────────────────────────────────────────
+Si el paciente quiere cambiar su cita existente:
+1. Confirma que desea reagendar (no cancelar)
+2. Pide el nuevo día y hora
+3. Confirma los nuevos datos con el paciente
+4. Llama a reschedule_appointment — esto marca la cita anterior como "rescheduled" y crea la nueva
+
+── CANCELACIÓN ───────────────────────────────────────────────────────────────
+Si el paciente quiere cancelar su cita:
+1. Confirma que desea cancelar definitivamente
+2. Ofrece reagendar en su lugar antes de proceder
+3. Si confirma la cancelación, llama a cancel_appointment — esto marca la cita como "cancelled_by_patient"
+4. Despídete con amabilidad y recuerda que puede volver a agendar cuando quiera
+
 ── DISPONIBILIDAD ────────────────────────────────────────────────────────────
 La fecha actual es: {fecha_actual}. Úsala como referencia para interpretar fechas que el paciente mencione sin año.
+Solo considera ocupados los horarios de citas con status "confirmed". Citas con status "rescheduled" o "cancelled_by_patient" liberan ese horario.
 Por ahora usa disponibilidad fija:
 - Lunes a Viernes: 9:00, 10:00, 11:00, 12:00, 15:00, 16:00, 17:00, 18:00, 19:00
 - Sábados: 9:00, 10:00, 11:00, 12:00, 13:00
@@ -95,6 +110,33 @@ tools = [
         }
     },
     {
+        "name": "reschedule_appointment",
+        "description": "Reagenda una cita: marca la cita activa del paciente como 'rescheduled' y crea una nueva con los datos actualizados",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "telegram_id":  {"type": "string", "description": "ID de Telegram del paciente"},
+                "patient_name": {"type": "string", "description": "Nombre completo del paciente"},
+                "phone":        {"type": "string", "description": "Número de contacto"},
+                "date":         {"type": "string", "description": "Nueva fecha YYYY-MM-DD"},
+                "time":         {"type": "string", "description": "Nueva hora HH:MM"},
+                "modality":     {"type": "string", "enum": ["presencial", "videollamada"]}
+            },
+            "required": ["telegram_id", "patient_name", "phone", "date", "time", "modality"]
+        }
+    },
+    {
+        "name": "cancel_appointment",
+        "description": "Cancela la cita activa del paciente cambiando su status a 'cancelled_by_patient'",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "telegram_id": {"type": "string", "description": "ID de Telegram del paciente"}
+            },
+            "required": ["telegram_id"]
+        }
+    },
+    {
         "name": "flag_crisis",
         "description": "Alerta a la psicóloga cuando un paciente expresa una crisis emocional",
         "input_schema": {
@@ -124,6 +166,53 @@ def save_appointment(data: dict) -> str:
         return "Cita guardada correctamente."
     except Exception as e:
         return f"Error al guardar: {e}"
+
+def reschedule_appointment(data: dict) -> str:
+    try:
+        res = supabase.table("appointments") \
+            .select("id") \
+            .eq("telegram_id", data["telegram_id"]) \
+            .eq("status", "confirmed") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if res.data:
+            supabase.table("appointments") \
+                .update({"status": "rescheduled"}) \
+                .eq("id", res.data[0]["id"]) \
+                .execute()
+        supabase.table("appointments").insert({
+            "patient_name": data["patient_name"],
+            "phone":        data["phone"],
+            "date":         data["date"],
+            "time":         data["time"],
+            "modality":     data["modality"],
+            "telegram_id":  data["telegram_id"],
+            "created_at":   datetime.utcnow().isoformat(),
+            "status":       "confirmed"
+        }).execute()
+        return "Cita reagendada correctamente."
+    except Exception as e:
+        return f"Error al reagendar: {e}"
+
+def cancel_appointment(data: dict) -> str:
+    try:
+        res = supabase.table("appointments") \
+            .select("id") \
+            .eq("telegram_id", data["telegram_id"]) \
+            .eq("status", "confirmed") \
+            .order("created_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if not res.data:
+            return "No se encontró cita activa para cancelar."
+        supabase.table("appointments") \
+            .update({"status": "cancelled_by_patient"}) \
+            .eq("id", res.data[0]["id"]) \
+            .execute()
+        return "Cita cancelada correctamente."
+    except Exception as e:
+        return f"Error al cancelar: {e}"
 
 def flag_crisis(data: dict, bot_token: str, psych_telegram_id: str) -> str:
     """Notifica a la psicóloga por Telegram cuando hay una crisis."""
@@ -222,6 +311,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             if block.name == "save_appointment":
                 result = save_appointment(block.input)
+            elif block.name == "reschedule_appointment":
+                result = reschedule_appointment(block.input)
+            elif block.name == "cancel_appointment":
+                result = cancel_appointment(block.input)
             elif block.name == "flag_crisis":
                 result = flag_crisis(block.input, bot_token, psych_id)
             else:
