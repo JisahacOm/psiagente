@@ -309,14 +309,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Guarda el turno del asistente como dicts serializables (Bug 1)
                 history.append({"role": "assistant", "content": blocks_to_dicts(response.content)})
 
+            # Inyecta el chat_id real — Claude no conoce el telegram_id del usuario
+            tool_input = {**block.input, "telegram_id": chat_id}
+
             if block.name == "save_appointment":
-                result = save_appointment(block.input)
+                result = save_appointment(tool_input)
             elif block.name == "reschedule_appointment":
-                result = reschedule_appointment(block.input)
+                result = reschedule_appointment(tool_input)
             elif block.name == "cancel_appointment":
-                result = cancel_appointment(block.input)
+                result = cancel_appointment(tool_input)
             elif block.name == "flag_crisis":
-                result = flag_crisis(block.input, bot_token, psych_id)
+                result = flag_crisis(tool_input, bot_token, psych_id)
             else:
                 result = "Función no reconocida."
 
