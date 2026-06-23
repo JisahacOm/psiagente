@@ -5,7 +5,7 @@ import os
 import json
 import asyncio
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 tijuana_tz = ZoneInfo("America/Tijuana")
@@ -18,6 +18,12 @@ MESES = {
     1: "enero", 2: "febrero", 3: "marzo", 4: "abril",
     5: "mayo", 6: "junio", 7: "julio", 8: "agosto",
     9: "septiembre", 10: "octubre", 11: "noviembre", 12: "diciembre"
+}
+DIAS = {
+    "Monday": "lunes", "Tuesday": "martes",
+    "Wednesday": "miércoles", "Thursday": "jueves",
+    "Friday": "viernes", "Saturday": "sábado",
+    "Sunday": "domingo"
 }
 
 # ── Clientes ──────────────────────────────────────────────────────────────────
@@ -39,6 +45,49 @@ en ese mismo idioma desde el primer mensaje. No lo cambies durante la conversaci
 - Nunca robótica ni con menús numerados
 - Respuestas cortas (2-4 líneas máximo en WhatsApp/Telegram)
 - Usa el nombre del paciente cuando lo sepas
+
+── FORMATO VISUAL ────────────────────────────────────────────────────────────
+IMPORTANTE: No uses markdown en tus respuestas. Telegram no renderiza **negritas**, _cursivas_ ni ningún formato markdown. Usa solo texto plano con emojis para dar estructura visual.
+
+Sustituciones obligatorias:
+- En lugar de **Nombre:** → 👤 Nombre:
+- En lugar de **Fecha:** → 📅 Fecha:
+- En lugar de **Hora:** → 🕐 Hora:
+- En lugar de **Teléfono:** → 📱 Teléfono:
+
+Usa emojis y estructura visual en mensajes informativos. Sin exagerar — uno o dos emojis clave por bloque.
+
+Al mostrar disponibilidad:
+📅 Estos son los horarios disponibles con la Psic. Marysol:
+
+🗓 Lunes a Viernes: 9am — 7pm
+🗓 Sábados: 9am — 2pm
+📍 Presencial en Tijuana
+
+¿Qué día y hora te acomoda mejor? 😊
+
+Al confirmar una cita (antes de llamar a save_appointment):
+✅ ¡Listo! Tu cita quedaría así:
+📅 [día y fecha completa]
+🕐 [hora]
+📍 Edificio Verde, segundo piso
+💰 $800 MXN
+
+¿Confirmas? 😊
+
+Al enviar la confirmación final (después de save_appointment):
+✅ ¡Tu cita está confirmada!
+📅 [día y fecha]
+🕐 [hora]
+📍 Edificio Verde, segundo piso al fondo a la izquierda
+💰 $800 MXN
+
+Aquí tu ubicación: https://maps.app.goo.gl/xjbDU7EJVJKfmrj68?g_st=ic
+
+Cuando un horario esté ocupado:
+"[Nombre], esa hora ya está ocupada, disculpa 😊 ¿Te acomoda alguno de estos?: [opciones]"
+
+Regla general: mensajes de texto libre (saludos, preguntas) sin emojis o con uno máximo. Emojis solo en bloques de datos/confirmación.
 
 ── FLUJO DE AGENDAMIENTO ─────────────────────────────────────────────────────
 1. Saluda y pregunta en qué puedes ayudar
@@ -76,6 +125,9 @@ Por ahora usa disponibilidad fija:
 - Sábados: 9:00, 10:00, 11:00, 12:00, 13:00
 Duración de cada sesión: 50 minutos
 Modalidad: únicamente presencial en Tijuana. No ofrecer ni mencionar videollamada.
+Cuando un horario esté ocupado, responde con calidez y profesionalismo, nunca de forma seca. Ejemplo natural:
+  "[Nombre], esa hora ya está ocupada, disculpa 😊 ¿Te acomoda alguno de estos horarios disponibles: [lista de opciones]?"
+Siempre: usa el nombre del paciente, pide disculpas brevemente, ofrece alternativas inmediatamente en el mismo mensaje. Tono cálido pero profesional, como una buena recepcionista.
 
 ── INFORMACIÓN DEL CONSULTORIO ───────────────────────────────────────────────
 - Psicóloga: Psic. Marysol Beltrán
@@ -102,6 +154,20 @@ Señales a detectar (no solo palabras literales, evalúa el contexto emocional):
 - Menciones de hacerse daño, no querer seguir, sentirse sin salida
 - Desesperanza extrema, despedidas, regalar posesiones
 - Abuso activo o situación de peligro inmediato
+
+── LISTA DE ESPERA ────────────────────────────────────────────────────────────
+Si el paciente quiere una fecha/hora que está ocupada:
+1. Consulta el próximo slot disponible: llama a find_next_available con from_date=fecha_deseada
+2. Ofrece ese slot: "Ese horario está ocupado. El próximo disponible es el [fecha] a las [hora], ¿te funciona?"
+3a. Si acepta → procede con flujo normal (muestra resumen, confirma, llama a save_appointment)
+3b. Si prefiere esperar su fecha original → agrega a lista de espera:
+    - Si aún no tienes nombre y teléfono, pídelos
+    - Llama a add_to_waitlist con preferred_date=fecha_deseada
+    - Explica: "Te agregaré a la lista de espera. Si se libera un lugar en esa fecha, te avisaremos automáticamente por aquí."
+
+Si el paciente ya está en lista de espera y confirma aceptar un slot que le ofrecieron:
+- Llama a confirm_waitlist_offer
+- Despídete con la info del consultorio y el link de ubicación
 
 ── LO QUE NO HACES ───────────────────────────────────────────────────────────
 - No interpretas sueños, no das diagnósticos, no haces terapia
@@ -164,6 +230,42 @@ tools = [
                 "summary":     {"type": "string", "description": "Breve resumen de la situación"}
             },
             "required": ["telegram_id", "summary"]
+        }
+    },
+    {
+        "name": "find_next_available",
+        "description": "Busca el próximo slot disponible a partir de una fecha dada",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_date": {"type": "string", "description": "Fecha de inicio YYYY-MM-DD para buscar disponibilidad"}
+            },
+            "required": ["from_date"]
+        }
+    },
+    {
+        "name": "add_to_waitlist",
+        "description": "Agrega al paciente a la lista de espera cuando no hay slots disponibles en la fecha deseada",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "patient_name":   {"type": "string", "description": "Nombre completo del paciente"},
+                "phone":          {"type": "string", "description": "Número de contacto"},
+                "telegram_id":    {"type": "string", "description": "ID de Telegram del paciente"},
+                "preferred_date": {"type": "string", "description": "Fecha deseada YYYY-MM-DD"}
+            },
+            "required": ["patient_name", "phone", "telegram_id", "preferred_date"]
+        }
+    },
+    {
+        "name": "confirm_waitlist_offer",
+        "description": "Confirma que el paciente acepta el slot ofrecido de la lista de espera y crea la cita",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "telegram_id": {"type": "string", "description": "ID de Telegram del paciente"}
+            },
+            "required": ["telegram_id"]
         }
     }
 ]
@@ -236,6 +338,108 @@ def cancel_appointment(data: dict) -> str:
         return "Cita cancelada correctamente."
     except Exception as e:
         return f"Error al cancelar: {e}"
+
+def find_next_available(data: dict) -> str:
+    try:
+        from_date_str = data.get("from_date", datetime.now(tijuana_tz).strftime("%Y-%m-%d"))
+        from_date = datetime.strptime(from_date_str, "%Y-%m-%d").date()
+        until_str = (from_date + timedelta(days=60)).strftime("%Y-%m-%d")
+
+        res = supabase.table("appointments") \
+            .select("date, time") \
+            .eq("status", "confirmed") \
+            .gte("date", from_date_str) \
+            .lte("date", until_str) \
+            .execute()
+
+        occupied = {(a["date"], str(a["time"])[:5]) for a in res.data}
+
+        weekday_slots  = ["09:00","10:00","11:00","12:00","15:00","16:00","17:00","18:00","19:00"]
+        saturday_slots = ["09:00","10:00","11:00","12:00","13:00"]
+
+        current = from_date
+        for _ in range(60):
+            dow = current.weekday()
+            if dow == 6:
+                current += timedelta(days=1)
+                continue
+            slots = saturday_slots if dow == 5 else weekday_slots
+            for slot in slots:
+                if (current.strftime("%Y-%m-%d"), slot) not in occupied:
+                    return json.dumps({"available": True, "date": current.strftime("%Y-%m-%d"), "time": slot})
+            current += timedelta(days=1)
+
+        return json.dumps({"available": False, "message": "No hay disponibilidad en los próximos 60 días."})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+def add_to_waitlist(data: dict) -> str:
+    try:
+        existing = supabase.table("waitlist") \
+            .select("id") \
+            .eq("telegram_id", data["telegram_id"]) \
+            .eq("status", "waiting") \
+            .execute()
+        if existing.data:
+            return "El paciente ya está en la lista de espera."
+
+        supabase.table("waitlist").insert({
+            "patient_name":   data["patient_name"],
+            "phone":          data["phone"],
+            "telegram_id":    data["telegram_id"],
+            "preferred_date": data.get("preferred_date"),
+            "status":         "waiting",
+            "created_at":     datetime.now(tijuana_tz).isoformat()
+        }).execute()
+        return "Paciente agregado a la lista de espera correctamente."
+    except Exception as e:
+        return f"Error al agregar a lista de espera: {e}"
+
+def confirm_waitlist_offer(data: dict) -> str:
+    try:
+        res = supabase.table("waitlist") \
+            .select("*") \
+            .eq("telegram_id", data["telegram_id"]) \
+            .eq("status", "offered") \
+            .order("last_offer_at", desc=True) \
+            .limit(1) \
+            .execute()
+        if not res.data:
+            return "No hay oferta activa de lista de espera para este paciente."
+
+        entry = res.data[0]
+
+        if entry.get("offer_expires_at"):
+            expires = datetime.fromisoformat(entry["offer_expires_at"])
+            now = datetime.now(tijuana_tz)
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=ZoneInfo("UTC"))
+            if now > expires:
+                supabase.table("waitlist").update({"status": "expired"}).eq("id", entry["id"]).execute()
+                return "La oferta expiró. El paciente ha sido removido de la lista de espera."
+
+        supabase.table("appointments").insert({
+            "patient_name": entry["patient_name"],
+            "phone":        entry["phone"],
+            "date":         entry["offered_date"],
+            "time":         entry["offered_time"],
+            "modality":     "presencial",
+            "telegram_id":  data["telegram_id"],
+            "created_at":   datetime.now(tijuana_tz).isoformat(),
+            "status":       "confirmed"
+        }).execute()
+        supabase.table("waitlist").update({"status": "confirmed"}).eq("id", entry["id"]).execute()
+
+        try:
+            dt = datetime.strptime(str(entry["offered_date"]), "%Y-%m-%d")
+            fecha_fmt = f"{dt.day} de {MESES[dt.month]} de {dt.year}"
+        except Exception:
+            fecha_fmt = str(entry.get("offered_date", ""))
+
+        hora_fmt = str(entry.get("offered_time", ""))[:5]
+        return f"Cita confirmada: {entry['patient_name']} el {fecha_fmt} a las {hora_fmt}."
+    except Exception as e:
+        return f"Error al confirmar oferta: {e}"
 
 def flag_crisis(data: dict, bot_token: str, psych_telegram_id: str) -> str:
     name = data.get("patient_name", "Paciente desconocido")
@@ -381,8 +585,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"[HIST] chat_id={chat_id} | ANTES: {before} mensajes")
     history.append({"role": "user", "content": user_text})
 
-    fecha_actual  = datetime.now(tijuana_tz).strftime("%d de %B de %Y")
+    _now         = datetime.now(tijuana_tz)
+    dia_semana   = DIAS[_now.strftime("%A")]
+    fecha_actual = f"{dia_semana} {_now.day} de {MESES[_now.month]} de {_now.year}"
     system_prompt = SYSTEM_PROMPT.replace("{fecha_actual}", fecha_actual)
+    injected_ok   = "{fecha_actual}" not in system_prompt
+    print(f"[FECHA] chat_id={chat_id} | fecha_actual='{fecha_actual}' | inyectada_ok={injected_ok}")
 
     # Llamada a Claude con tools
     response = anthropic.messages.create(
@@ -419,6 +627,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 result = cancel_appointment(tool_input)
             elif block.name == "flag_crisis":
                 result = flag_crisis(tool_input, bot_token, psych_id)
+            elif block.name == "find_next_available":
+                result = find_next_available(tool_input)
+            elif block.name == "add_to_waitlist":
+                result = add_to_waitlist(tool_input)
+            elif block.name == "confirm_waitlist_offer":
+                result = confirm_waitlist_offer(tool_input)
             else:
                 result = "Función no reconocida."
 
